@@ -533,6 +533,25 @@ def require_api_key(f):
     return _inner
 
 
+def require_api_key_strict(f):
+    """Like require_api_key but also rejects requests when API_KEY is not set.
+
+    Use this for mutating operations where open access must never be allowed.
+    """
+    @wraps(f)
+    def _inner(*args, **kwargs):
+        if not API_KEY:
+            return jsonify({'error': 'Forbidden – API_KEY must be configured to use this endpoint'}), 403
+        provided = (
+            request.headers.get('X-API-Key') or
+            request.args.get('api_key', '')
+        )
+        if provided != API_KEY:
+            return jsonify({'error': 'Unauthorized'}), 401
+        return f(*args, **kwargs)
+    return _inner
+
+
 # ===========================================================================
 # Routes
 # ===========================================================================
@@ -633,6 +652,71 @@ def start_bulk_fetch():
 @require_api_key
 def bulk_fetch_status():
     return jsonify(_bulk_state)
+
+
+# ---- Generic ABM API proxy --------------------------------------------------
+
+@app.route('/v1/proxy/<path:abm_path>', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
+@require_api_key
+def abm_proxy(abm_path):
+    """Transparent proxy to any ABM API endpoint.
+
+    Maps  GET /v1/proxy/mdmServers
+      →   GET https://api-business.apple.com/v1/mdmServers
+
+    Query parameters, request body, and Content-Type are forwarded as-is.
+    The upstream HTTP status code is preserved in the response.
+    """
+    if not ABM_ENABLED:
+        return jsonify({'error': 'ABM not configured'}), 501
+
+    if request.method in ('POST', 'PUT', 'PATCH', 'DELETE'):
+        if not API_KEY:
+            return jsonify({'error': 'Forbidden – API_KEY must be configured to allow write operations'}), 403
+        provided = (
+            request.headers.get('X-API-Key') or
+            request.args.get('api_key', '')
+        )
+        if provided != API_KEY:
+            return jsonify({'error': 'Unauthorized'}), 401
+
+    try:
+        token = get_token()
+    except Exception as e:
+        log.error("ABM proxy: failed to obtain token: %s", e)
+        return jsonify({'error': 'Failed to obtain ABM access token', 'detail': str(e)}), 502
+
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'Accept': 'application/json',
+    }
+    if request.content_type:
+        headers['Content-Type'] = request.content_type
+
+    url = f'{ABM_API_BASE}/{abm_path}'
+    log.info("ABM proxy: %s %s params=%s", request.method, url, dict(request.args))
+
+    try:
+        upstream = requests.request(
+            method=request.method,
+            url=url,
+            params=request.args,
+            headers=headers,
+            data=request.get_data() or None,
+            timeout=30,
+        )
+    except requests.RequestException as e:
+        log.error("ABM proxy: upstream request failed: %s", e)
+        return jsonify({'error': 'Upstream request failed', 'detail': str(e)}), 502
+
+    try:
+        return jsonify(upstream.json()), upstream.status_code
+    except ValueError:
+        return (
+            upstream.text,
+            upstream.status_code,
+            {'Content-Type': upstream.headers.get('Content-Type', 'text/plain')},
+        )
 
 
 # ---- SOFA endpoint ----------------------------------------------------------
