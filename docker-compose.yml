@@ -1,0 +1,28 @@
+services:
+  abm-proxy:
+    build: .
+    image: abm-proxy:latest
+    container_name: abm-proxy
+    restart: unless-stopped
+    ports:
+      - "${PORT:-5050}:${PORT:-5050}"
+    env_file:
+      - .env
+    volumes:
+      # Persistent device cache
+      - abm-cache:/data/cache
+      # Mount your EC private key (read-only)
+      # Adjust the host path to match ABM_PRIVATE_KEY_FILE in your .env
+      - ./private_key.pem:/secrets/private_key.pem:ro
+    environment:
+      - ABM_PRIVATE_KEY_FILE=/secrets/private_key.pem
+      - CACHE_DIR=/data/cache
+    healthcheck:
+      test: ["CMD", "sh", "-c",
+             "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:${PORT:-5050}/health')\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  abm-cache:

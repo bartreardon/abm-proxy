@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ABM Device Lookup</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #f5f5f7;
+      --card-bg:   #ffffff;
+      --border:    #d2d2d7;
+      --accent:    #0071e3;
+      --accent-h:  #0077ed;
+      --text:      #1d1d1f;
+      --muted:     #6e6e73;
+      --success:   #28a745;
+      --warn:      #ff9500;
+      --danger:    #ff3b30;
+      --radius:    14px;
+      --shadow:    0 2px 12px rgba(0,0,0,.08);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    header {
+      background: rgba(255,255,255,.85);
+      backdrop-filter: saturate(180%) blur(20px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      height: 52px;
+      gap: 10px;
+    }
+    header svg { flex-shrink: 0; }
+    header h1 { font-size: 17px; font-weight: 600; letter-spacing: -.2px; }
+    header .spacer { flex: 1; }
+    #health-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--muted); transition: background .3s;
+    }
+    #health-dot.ok  { background: var(--success); }
+    #health-dot.err { background: var(--danger); }
+    #health-label { font-size: 12px; color: var(--muted); }
+
+    main {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 40px 20px 80px;
+    }
+
+    /* Search */
+    .search-box {
+      background: var(--card-bg);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 28px 28px 24px;
+      margin-bottom: 28px;
+    }
+    .search-box h2 { font-size: 22px; font-weight: 600; margin-bottom: 6px; }
+    .search-box p  { font-size: 14px; color: var(--muted); margin-bottom: 20px; }
+
+    .input-row {
+      display: flex;
+      gap: 10px;
+    }
+    .input-row input {
+      flex: 1;
+      padding: 12px 16px;
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      font-size: 15px;
+      outline: none;
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      transition: border-color .15s;
+    }
+    .input-row input:focus { border-color: var(--accent); }
+    .input-row input::placeholder { text-transform: none; letter-spacing: 0; font-family: inherit; color: #aaa; }
+
+    button {
+      padding: 12px 22px;
+      border: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity .15s, background .15s;
+    }
+    button:hover { opacity: .88; }
+    button:disabled { opacity: .5; cursor: default; }
+
+    .btn-primary  { background: var(--accent); color: #fff; }
+    .btn-outline  { background: transparent; border: 1.5px solid var(--border); color: var(--text); }
+    .btn-sm       { padding: 7px 14px; font-size: 13px; }
+    .btn-danger   { background: var(--danger); color: #fff; }
+
+    /* Status / error bar */
+    #status-bar {
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      font-size: 14px;
+      margin-bottom: 20px;
+      display: none;
+    }
+    #status-bar.info  { background: #e8f0fe; color: #174ea6; display: block; }
+    #status-bar.error { background: #fce8e6; color: #c5221f; display: block; }
+
+    /* Spinner */
+    .spinner {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,.4);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Results */
+    #result { display: none; }
+
+    .result-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      background: var(--card-bg);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 24px;
+      margin-bottom: 16px;
+    }
+    .device-icon {
+      width: 56px; height: 56px;
+      background: var(--bg);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      font-size: 28px;
+    }
+    .result-title h3  { font-size: 20px; font-weight: 600; }
+    .result-title .serial { font-size: 13px; color: var(--muted); margin-top: 2px; font-family: monospace; }
+    .badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .badge.assigned   { background: #e6f4ea; color: #137333; }
+    .badge.unassigned { background: #fce8e6; color: #c5221f; }
+    .badge.cached     { background: #e8f0fe; color: #174ea6; }
+    .badge.live       { background: #fef7e0; color: #b45309; }
+    .badge.covered    { background: #e6f4ea; color: #137333; }
+    .badge.expired    { background: #fce8e6; color: #c5221f; }
+    .badge.none       { background: #f1f3f4; color: #5f6368; }
+
+    .result-header .actions { margin-left: auto; display: flex; gap: 8px; }
+
+    /* Cards grid */
+    .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 600px) { .cards { grid-template-columns: 1fr; } }
+
+    .card {
+      background: var(--card-bg);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 20px 22px;
+    }
+    .card h4 {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+    .field { margin-bottom: 11px; }
+    .field:last-child { margin-bottom: 0; }
+    .field .label { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+    .field .value { font-size: 14px; word-break: break-all; }
+    .field .value.mono { font-family: 'SF Mono', 'Menlo', monospace; font-size: 13px; }
+    .field .value.na   { color: var(--muted); }
+
+    /* macOS versions */
+    #sofa-section { margin-top: 28px; display: none; }
+    #sofa-section h3 { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+    .os-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+    .os-card {
+      background: var(--card-bg);
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+      padding: 16px 18px;
+    }
+    .os-card .os-name   { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+    .os-card .os-ver    { font-size: 18px; font-weight: 700; }
+    .os-card .os-build  { font-size: 11px; color: var(--muted); margin-top: 2px; font-family: monospace; }
+    .os-card .os-date   { font-size: 11px; color: var(--muted); margin-top: 6px; }
+    .os-card a          { font-size: 11px; color: var(--accent); text-decoration: none; }
+
+    footer {
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+      padding: 20px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>ABM Device Lookup</h1>
+  <div class="spacer"></div>
+  <div id="health-dot" title="Service health"></div>
+  <span id="health-label">Checking…</span>
+</header>
+
+<main>
+
+  <div class="search-box">
+    <h2>Device Lookup</h2>
+    <p>Enter a device serial number to retrieve its Apple Business Manager record.</p>
+    <div class="input-row">
+      <input type="text" id="serial-input" placeholder="e.g. C02XXXXXXMD6T" maxlength="20"
+             autocomplete="off" autocorrect="off" spellcheck="false" />
+      <button class="btn-primary" id="lookup-btn" onclick="lookupDevice()">Look Up</button>
+    </div>
+  </div>
+
+  <div id="status-bar"></div>
+
+  <div id="result">
+    <div class="result-header">
+      <div class="device-icon" id="device-icon">💻</div>
+      <div class="result-title">
+        <h3 id="device-name">—</h3>
+        <div class="serial" id="device-serial">—</div>
+        <div class="badges" id="device-badges"></div>
+      </div>
+      <div class="actions">
+        <button class="btn-outline btn-sm" onclick="refreshDevice()" id="refresh-btn">↻ Refresh</button>
+      </div>
+    </div>
+
+    <div class="cards">
+      <!-- Device info -->
+      <div class="card">
+        <h4>Device Details</h4>
+        <div class="field"><div class="label">Model</div><div class="value" id="f-model">—</div></div>
+        <div class="field"><div class="label">Product Type</div><div class="value" id="f-product-type">—</div></div>
+        <div class="field"><div class="label">Product Family</div><div class="value" id="f-family">—</div></div>
+        <div class="field"><div class="label">Colour</div><div class="value" id="f-colour">—</div></div>
+        <div class="field"><div class="label">Capacity</div><div class="value" id="f-capacity">—</div></div>
+      </div>
+
+      <!-- Identifiers -->
+      <div class="card">
+        <h4>Identifiers</h4>
+        <div class="field"><div class="label">Serial Number</div><div class="value mono" id="f-serial">—</div></div>
+        <div class="field"><div class="label">Wi-Fi MAC</div><div class="value mono" id="f-wifi-mac">—</div></div>
+        <div class="field"><div class="label">Bluetooth MAC</div><div class="value mono" id="f-bt-mac">—</div></div>
+        <div class="field"><div class="label">IMEI</div><div class="value mono" id="f-imei">—</div></div>
+        <div class="field"><div class="label">MEID</div><div class="value mono" id="f-meid">—</div></div>
+      </div>
+
+      <!-- Enrolment -->
+      <div class="card">
+        <h4>Enrolment &amp; Assignment</h4>
+        <div class="field"><div class="label">Status</div><div class="value" id="f-status">—</div></div>
+        <div class="field"><div class="label">MDM Server</div><div class="value" id="f-mdm-server">—</div></div>
+        <div class="field"><div class="label">Server Type</div><div class="value" id="f-server-type">—</div></div>
+        <div class="field"><div class="label">Added to Org</div><div class="value" id="f-added">—</div></div>
+        <div class="field"><div class="label">Last Updated</div><div class="value" id="f-updated">—</div></div>
+      </div>
+
+      <!-- Purchase -->
+      <div class="card">
+        <h4>Purchase</h4>
+        <div class="field"><div class="label">Order Date</div><div class="value" id="f-order-date">—</div></div>
+        <div class="field"><div class="label">Order Number</div><div class="value mono" id="f-order-num">—</div></div>
+        <div class="field"><div class="label">Part Number</div><div class="value mono" id="f-part-num">—</div></div>
+        <div class="field"><div class="label">Purchase Source</div><div class="value" id="f-purchase-src">—</div></div>
+      </div>
+
+      <!-- AppleCare -->
+      <div class="card" id="applecare-card">
+        <h4>AppleCare Coverage</h4>
+        <div id="applecare-content">
+          <div class="field"><div class="value na">No coverage information available</div></div>
+        </div>
+      </div>
+
+      <!-- SOFA model info -->
+      <div class="card" id="sofa-model-card" style="display:none">
+        <h4>Compatibility <span style="font-weight:400;font-size:11px;color:var(--muted)">via SOFA</span></h4>
+        <div class="field"><div class="label">Marketing Name</div><div class="value" id="f-sofa-name">—</div></div>
+        <div class="field">
+          <div class="label">Supported OS</div>
+          <div id="f-sofa-os" style="display:flex;flex-wrap:wrap;gap:5px;margin-top:4px"></div>
+        </div>
+      </div>
+
+      <!-- Cache meta -->
+      <div class="card">
+        <h4>Cache Status</h4>
+        <div class="field"><div class="label">Source</div><div class="value" id="f-cache-source">—</div></div>
+        <div class="field"><div class="label">Cached At</div><div class="value" id="f-cached-at">—</div></div>
+      </div>
+    </div>
+  </div><!-- #result -->
+
+  <!-- macOS versions from SOFA -->
+  <div id="sofa-section">
+    <h3>Latest macOS Releases <span style="font-size:12px;color:var(--muted);font-weight:400">via SOFA</span></h3>
+    <div class="os-grid" id="os-grid"></div>
+  </div>
+
+</main>
+
+<footer>ABM Proxy &nbsp;·&nbsp; Data sourced from Apple Business Manager API</footer>
+
+<script>
+  'use strict';
+
+  const $ = id => document.getElementById(id);
+
+  // ---- Health check --------------------------------------------------------
+  async function checkHealth() {
+    try {
+      const r = await fetch('/health');
+      const d = await r.json();
+      $('health-dot').className = d.abm_enabled ? 'ok' : 'err';
+      $('health-label').textContent = d.abm_enabled
+        ? `Connected · ${d.cached_devices} cached`
+        : 'ABM not configured';
+    } catch {
+      $('health-dot').className = 'err';
+      $('health-label').textContent = 'Unreachable';
+    }
+  }
+
+  // ---- SOFA ----------------------------------------------------------------
+  async function loadSofa() {
+    try {
+      const r = await fetch('/api/v1/sofa');
+      if (!r.ok) return;
+      const d = await r.json();
+      const versions = d.versions || {};
+      const keys = Object.keys(versions).sort((a, b) => {
+        const ver = s => parseFloat(s.match(/(\d+(?:\.\d+)?)\s*$/)?.[1] ?? '0');
+        return ver(b) - ver(a);
+      });
+      if (!keys.length) return;
+
+      const grid = $('os-grid');
+      grid.innerHTML = '';
+      keys.forEach(name => {
+        const v = versions[name];
+        const el = document.createElement('div');
+        el.className = 'os-card';
+        el.innerHTML = `
+          <div class="os-name">${esc(name)}</div>
+          <div class="os-ver">${esc(v.version || '–')}</div>
+          <div class="os-build">${esc(v.build || '')}</div>
+          <div class="os-date">${v.release_date ? fmtDate(v.release_date) : ''}</div>
+          ${v.details_url ? `<a href="${esc(v.details_url)}" target="_blank" rel="noopener">Security info ↗</a>` : ''}
+        `;
+        grid.appendChild(el);
+      });
+      $('sofa-section').style.display = 'block';
+    } catch { /* silent */ }
+  }
+
+  // ---- Device lookup -------------------------------------------------------
+  let currentSerial = null;
+
+  $('serial-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') lookupDevice();
+  });
+
+  // Update the browser URL to /<serial> without reloading
+  function pushSerial(serial) {
+    const url = serial ? '/' + encodeURIComponent(serial) : '/';
+    if (window.location.pathname !== url) {
+      history.pushState({serial}, '', url);
+    }
+  }
+
+  // Handle browser back/forward
+  window.addEventListener('popstate', e => {
+    const serial = e.state?.serial || serialFromPath();
+    if (serial) {
+      $('serial-input').value = serial;
+      lookupDevice(serial);
+    } else {
+      $('serial-input').value = '';
+      $('result').style.display = 'none';
+      clearStatus();
+    }
+  });
+
+  function serialFromPath() {
+    const seg = window.location.pathname.replace(/^\//, '').trim();
+    return seg || null;
+  }
+
+  async function lookupDevice(overrideSerial) {
+    const serial = (overrideSerial || $('serial-input').value).trim().toUpperCase();
+    if (!serial) return;
+
+    currentSerial = serial;
+    $('serial-input').value = serial;
+    pushSerial(serial);
+    setStatus('info', '<span class="spinner"></span> Looking up ' + esc(serial) + '…');
+    $('result').style.display = 'none';
+    $('lookup-btn').disabled = true;
+
+    try {
+      const r = await fetch(`/api/v1/devices/${encodeURIComponent(serial)}`);
+      const d = await r.json();
+
+      if (!r.ok) {
+        setStatus('error', d.error || `Error ${r.status}`);
+        return;
+      }
+
+      clearStatus();
+      renderDevice(d);
+      checkHealth();
+    } catch (e) {
+      setStatus('error', 'Network error: ' + e.message);
+    } finally {
+      $('lookup-btn').disabled = false;
+    }
+  }
+
+  async function refreshDevice() {
+    if (!currentSerial) return;
+    setStatus('info', '<span class="spinner"></span> Refreshing from ABM…');
+    $('refresh-btn').disabled = true;
+
+    try {
+      const r = await fetch(`/api/v1/devices/${encodeURIComponent(currentSerial)}/refresh`, {
+        method: 'POST',
+      });
+      const d = await r.json();
+
+      if (!r.ok) {
+        setStatus('error', d.error || `Error ${r.status}`);
+        return;
+      }
+
+      clearStatus();
+      renderDevice(d);
+      checkHealth();
+    } catch (e) {
+      setStatus('error', 'Network error: ' + e.message);
+    } finally {
+      $('refresh-btn').disabled = false;
+    }
+  }
+
+  // ---- Render --------------------------------------------------------------
+  function renderDevice(d) {
+    const attrs = d.device?.attributes || {};
+    const srv   = d.assignedServer?.attributes || null;
+    const cov   = d.appleCareCoverage || [];
+
+    // Header
+    $('device-icon').textContent = familyIcon(attrs.productFamily);
+    $('device-name').textContent = attrs.deviceModel || attrs.productType || d.serial_number;
+    $('device-serial').textContent = d.serial_number;
+
+    const badges = $('device-badges');
+    badges.innerHTML = '';
+    const status = attrs.status || 'UNKNOWN';
+    addBadge(badges, status, status === 'ASSIGNED' ? 'assigned' : 'unassigned');
+    addBadge(badges, d.from_cache ? 'Cached' : 'Live', d.from_cache ? 'cached' : 'live');
+
+    // Device details
+    setField('f-model',        attrs.deviceModel);
+    setField('f-product-type', attrs.productType);
+    setField('f-family',       attrs.productFamily);
+    setField('f-colour',       attrs.color);
+    setField('f-capacity',     attrs.capacity);
+
+    // Identifiers
+    setField('f-serial',   attrs.serialNumber || d.serial_number);
+    setField('f-wifi-mac', attrs.wifiMacAddress);
+    setField('f-bt-mac',   attrs.bluetoothMacAddress);
+    setField('f-imei',     attrs.imei);
+    setField('f-meid',     attrs.meid);
+
+    // Enrolment
+    setField('f-status', status);
+    setField('f-mdm-server',  srv?.serverName);
+    setField('f-server-type', srv?.serverType);
+    setField('f-added',   fmtDate(attrs.addedToOrgDateTime));
+    setField('f-updated', fmtDate(attrs.updatedDateTime));
+
+    // Purchase
+    setField('f-order-date',   fmtDate(attrs.orderDateTime));
+    setField('f-order-num',    attrs.orderNumber);
+    setField('f-part-num',     attrs.partNumber);
+    setField('f-purchase-src', attrs.purchaseSourceType);
+
+    // AppleCare
+    renderAppleCare(cov);
+
+    // SOFA model info
+    renderSofaModel(d.sofaModelInfo);
+
+    // Cache meta
+    setField('f-cache-source', d.from_cache ? 'Local cache' : 'ABM API (live)');
+    setField('f-cached-at',    fmtDate(d.cached_at));
+
+    $('result').style.display = 'block';
+  }
+
+  function renderAppleCare(coverage) {
+    const el = $('applecare-content');
+    if (!coverage || !coverage.length) {
+      el.innerHTML = '<div class="field"><div class="value na">No coverage information available</div></div>';
+      return;
+    }
+
+    el.innerHTML = '';
+    coverage.forEach(item => {
+      const a   = item.attributes || {};
+      const end = a.endDateTime;
+      const now = new Date();
+
+      // Derive active state: prefer explicit status field, fall back to date check
+      let isActive;
+      if (a.status) {
+        isActive = a.status === 'ACTIVE' && !a.isCanceled;
+      } else if (end) {
+        isActive = new Date(end) > now;
+      } else {
+        isActive = null;
+      }
+
+      const statusBadge = isActive === true
+        ? '<span class="badge covered">Active</span>'
+        : isActive === false
+          ? '<span class="badge expired">Expired</span>'
+          : '';
+
+      const agreementLine = a.agreementNumber
+        ? `<div class="mono" style="font-size:12px;margin-top:4px;color:var(--muted)">Agreement: ${esc(a.agreementNumber)}</div>`
+        : '';
+
+      const dateLine = (a.startDateTime || end)
+        ? `<div style="font-size:12px;margin-top:4px;color:var(--muted)">
+             ${a.startDateTime ? fmtDate(a.startDateTime) : '?'}
+             &rarr;
+             ${end ? fmtDate(end) : '?'}
+           </div>`
+        : '';
+
+      const div = document.createElement('div');
+      div.className = 'field';
+      div.innerHTML = `
+        <div class="label">${esc(a.description || 'Coverage')}</div>
+        <div class="value">
+          ${statusBadge}
+          ${dateLine}
+          ${agreementLine}
+        </div>
+      `;
+      el.appendChild(div);
+    });
+  }
+
+  function renderSofaModel(info) {
+    const card = $('sofa-model-card');
+    if (!info) {
+      card.style.display = 'none';
+      return;
+    }
+
+    setField('f-sofa-name', info.MarketingName);
+
+    const osEl = $('f-sofa-os');
+    osEl.innerHTML = '';
+    (info.SupportedOS || []).forEach(os => {
+      const b = document.createElement('span');
+      b.className = 'badge none';
+      b.style.cssText = 'font-size:12px;padding:3px 10px';
+      b.textContent = os;
+      osEl.appendChild(b);
+    });
+
+    card.style.display = '';
+  }
+
+  // ---- Helpers -------------------------------------------------------------
+  function setField(id, value) {
+    const el = $(id);
+    if (!el) return;
+    if (value === null || value === undefined || value === '') {
+      el.textContent = '—';
+      el.className = el.className.replace(' na', '') + ' na';
+    } else {
+      el.textContent = value;
+      el.className = el.className.replace(' na', '');
+    }
+  }
+
+  function addBadge(container, text, cls) {
+    const b = document.createElement('span');
+    b.className = `badge ${cls}`;
+    b.textContent = text;
+    container.appendChild(b);
+  }
+
+  function familyIcon(family) {
+    const map = {
+      Mac: '💻', iPhone: '📱', iPad: '⬛', AppleTV: '📺',
+      Watch: '⌚', Vision: '🥽',
+    };
+    return map[family] || '📦';
+  }
+
+  function fmtDate(str) {
+    if (!str) return null;
+    try {
+      return new Intl.DateTimeFormat(undefined, {
+        dateStyle: 'medium', timeStyle: 'short',
+      }).format(new Date(str));
+    } catch { return str; }
+  }
+
+  function esc(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function setStatus(type, html) {
+    const bar = $('status-bar');
+    bar.className = type;
+    bar.innerHTML = html;
+  }
+  function clearStatus() {
+    const bar = $('status-bar');
+    bar.className = '';
+    bar.innerHTML = '';
+    bar.style.display = 'none';
+  }
+
+  // ---- Init ----------------------------------------------------------------
+  checkHealth();
+  loadSofa();
+
+  // Auto-lookup if a serial is already in the URL path
+  const initSerial = serialFromPath();
+  if (initSerial) {
+    $('serial-input').value = initSerial;
+    lookupDevice(initSerial);
+  }
+</script>
+</body>
+</html>
