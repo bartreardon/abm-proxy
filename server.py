@@ -15,6 +15,12 @@ from pathlib import Path
 from functools import wraps
 
 import jwt
+from cryptography.hazmat.primitives.serialization import (
+    load_pem_private_key,
+    Encoding,
+    PrivateFormat,
+    NoEncryption,
+)
 import requests
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
@@ -104,7 +110,14 @@ def generate_client_assertion() -> str:
     if not key_path.exists():
         raise RuntimeError(f"Private key file not found: {ABM_PRIVATE_KEY_FILE}")
 
-    private_key = key_path.read_text()
+    key_bytes = key_path.read_bytes()
+    # Normalise SEC1/traditional EC keys ("BEGIN EC PRIVATE KEY") to PKCS#8 so
+    # PyJWT can sign with them regardless of which format the .p8 file uses.
+    if b'BEGIN EC PRIVATE KEY' in key_bytes:
+        _ec_key = load_pem_private_key(key_bytes, password=None)
+        key_bytes = _ec_key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption())
+        log.debug("Converted SEC1 EC private key to PKCS#8 for JWT signing")
+    private_key = load_pem_private_key(key_bytes, password=None)
     payload = {
         'sub': ABM_CLIENT_ID,
         'iss': ABM_CLIENT_ID,
