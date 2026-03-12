@@ -114,8 +114,9 @@
       margin-bottom: 20px;
       display: none;
     }
-    #status-bar.info  { background: #e8f0fe; color: #174ea6; display: block; }
-    #status-bar.error { background: #fce8e6; color: #c5221f; display: block; }
+    #status-bar.info    { background: #e8f0fe; color: #174ea6; display: block; }
+    #status-bar.error   { background: #fce8e6; color: #c5221f; display: block; }
+    #status-bar.warning { background: #fef7e0; color: #b45309; display: block; }
 
     /* Spinner */
     .spinner {
@@ -434,7 +435,11 @@
       const d = await r.json();
 
       if (!r.ok) {
-        setStatus('error', d.error || `Error ${r.status}`);
+        if (r.status === 404) {
+          setStatus('warning', `No record found for <strong>${esc(serial)}</strong> — the device may not be enrolled in ABM.`);
+        } else {
+          setStatus('error', d.error || `Server error (${r.status}) — please try again or check the service status.`);
+        }
         return;
       }
 
@@ -442,7 +447,7 @@
       renderDevice(d);
       checkHealth();
     } catch (e) {
-      setStatus('error', 'Network error: ' + e.message);
+      setStatus('error', 'Could not reach the server. Check your network connection and try again.');
     } finally {
       $('lookup-btn').disabled = false;
     }
@@ -460,7 +465,7 @@
       const d = await r.json();
 
       if (!r.ok) {
-        setStatus('error', d.error || `Error ${r.status}`);
+        setStatus('error', d.error || `Server error (${r.status}) — refresh failed.`);
         return;
       }
 
@@ -468,7 +473,7 @@
       renderDevice(d);
       checkHealth();
     } catch (e) {
-      setStatus('error', 'Network error: ' + e.message);
+      setStatus('error', 'Could not reach the server. Check your network connection and try again.');
     } finally {
       $('refresh-btn').disabled = false;
     }
@@ -651,6 +656,7 @@
 
   function setStatus(type, html) {
     const bar = $('status-bar');
+    bar.style.display = '';   // let CSS class control visibility
     bar.className = type;
     bar.innerHTML = html;
   }
@@ -658,7 +664,7 @@
     const bar = $('status-bar');
     bar.className = '';
     bar.innerHTML = '';
-    bar.style.display = 'none';
+    // no inline style — class '' already hides it via CSS default display:none
   }
 
   // ---- Init ----------------------------------------------------------------
