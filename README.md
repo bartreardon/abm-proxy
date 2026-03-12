@@ -149,7 +149,7 @@ sudo systemctl status abm-proxy
 ### Before you start
 
 Ensure the Docker daemon can reach the internet for the image pull.
-On some Linux systems the default DNS (`127.0.0.53`) is unreachable from inside Docker.
+On some Linux systems the default DNS is unreachable from inside Docker.
 If the build fails with a DNS timeout, add this to `/etc/docker/daemon.json` and restart Docker:
 
 ```json
