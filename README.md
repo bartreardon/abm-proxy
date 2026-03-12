@@ -462,6 +462,14 @@ and can be inspected or deleted manually at any time.
 
 ---
 
+## HTTPS / TLS Setup
+
+ABM Proxy speaks plain HTTP — use a reverse proxy for TLS termination.  
+See [docs/https-setup.md](docs/https-setup.md) for details covering
+Nginx + Certbot, Caddy, and self-signed certificates.
+
+---
+
 ## Security Notes
 
 - Restrict permissions on `private_key.pem`: `chmod 600 private_key.pem`
