@@ -1,9 +1,5 @@
 FROM python:3.12-slim
 
-# Install openssl (required for JWT signing)
-RUN apt-get update && apt-get install -y --no-install-recommends openssl \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
 COPY requirements.txt .

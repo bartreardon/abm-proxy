@@ -95,7 +95,7 @@ Set `PORT` to whichever port you want the service to listen on (default `5050`).
 **Development / testing:**
 
 ```bash
-python server.py
+python3 server.py
 ```
 
 **Production (gunicorn):**

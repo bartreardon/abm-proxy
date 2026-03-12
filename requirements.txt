@@ -3,3 +3,4 @@ flask-cors>=4.0
 requests>=2.31
 python-dotenv>=1.0
 gunicorn>=21.0
+PyJWT[crypto]>=2.8

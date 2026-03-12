@@ -8,14 +8,13 @@ import os
 import json
 import time
 import uuid
-import base64
 import logging
 import threading
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from functools import wraps
 
+import jwt
 import requests
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
@@ -43,7 +42,7 @@ SOFA_FEED_URL       = os.getenv('SOFA_FEED_URL',
                         'https://sofafeed.macadmins.io/v1/macos_data_feed.json')
 SOFA_CACHE_TTL_HOURS = float(os.getenv('SOFA_CACHE_TTL_HOURS', '6'))
 
-ABM_ENABLED = all([ABM_CLIENT_ID, ABM_TEAM_ID, ABM_KEY_ID, ABM_PRIVATE_KEY_FILE])
+ABM_ENABLED = all([ABM_CLIENT_ID, ABM_KEY_ID, ABM_PRIVATE_KEY_FILE])
 ABM_API_BASE = 'https://api-business.apple.com/v1'
 ABM_AUTH_URL = 'https://account.apple.com/auth/oauth2/token'
 
@@ -95,14 +94,6 @@ Path(f'{CACHE_DIR}/devices').mkdir(parents=True, exist_ok=True)
 # Authentication
 # ===========================================================================
 
-def _b64url(data) -> str:
-    if isinstance(data, dict):
-        data = json.dumps(data, separators=(',', ':'))
-    if isinstance(data, str):
-        data = data.encode()
-    return base64.urlsafe_b64encode(data).rstrip(b'=').decode()
-
-
 def generate_client_assertion() -> str:
     """Build and sign an ES256 JWT for use as an OAuth2 client_assertion."""
     now = int(time.time())
@@ -113,47 +104,21 @@ def generate_client_assertion() -> str:
     if not key_path.exists():
         raise RuntimeError(f"Private key file not found: {ABM_PRIVATE_KEY_FILE}")
 
-    header  = {'alg': 'ES256', 'kid': ABM_KEY_ID, 'typ': 'JWT'}
+    private_key = key_path.read_text()
     payload = {
         'sub': ABM_CLIENT_ID,
+        'iss': ABM_CLIENT_ID,
         'aud': 'https://account.apple.com/auth/oauth2/v2/token',
         'iat': now,
         'exp': now + 180 * 86400,
         'jti': str(uuid.uuid4()),
-        'iss': ABM_TEAM_ID,
     }
-
-    signing_input = f'{_b64url(header)}.{_b64url(payload)}'.encode()
-
-    # Sign: produce DER-encoded ECDSA signature
-    proc = subprocess.run(
-        ['openssl', 'dgst', '-sha256', '-sign', str(key_path)],
-        input=signing_input, capture_output=True,
+    assertion = jwt.encode(
+        payload,
+        private_key,
+        algorithm='ES256',
+        headers={'kid': ABM_KEY_ID},
     )
-    if proc.returncode != 0:
-        raise RuntimeError(f"openssl signing failed: {proc.stderr.decode()}")
-
-    # Parse DER to extract raw R || S (IEEE P1363 format for JWT)
-    parse = subprocess.run(
-        ['openssl', 'asn1parse', '-inform', 'DER'],
-        input=proc.stdout, capture_output=True,
-    )
-    if parse.returncode != 0:
-        raise RuntimeError(f"openssl asn1parse failed: {parse.stderr.decode()}")
-
-    integers = [
-        line.split(':')[-1].strip()
-        for line in parse.stdout.decode().splitlines()
-        if 'INTEGER' in line
-    ]
-    if len(integers) < 2:
-        raise RuntimeError("Could not extract R,S values from DER signature")
-
-    r = integers[0].lstrip('0') or '0'
-    s = integers[1].lstrip('0') or '0'
-    sig = bytes.fromhex(r.zfill(64)[-64:] + s.zfill(64)[-64:])
-
-    assertion = f'{_b64url(header)}.{_b64url(payload)}.{_b64url(sig)}'
     _assertion_cache.update({'value': assertion, 'expires': now + 179 * 86400})
     log.info("Generated new ABM client assertion (valid ~179 days)")
     return assertion

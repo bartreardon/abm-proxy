@@ -19,7 +19,7 @@ services:
       - CACHE_DIR=/data/cache
     healthcheck:
       test: ["CMD", "sh", "-c",
-             "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:${PORT:-5050}/health')\""]
+             "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:${PORT:-5050}/health')\""]
       interval: 30s
       timeout: 5s
       retries: 3
