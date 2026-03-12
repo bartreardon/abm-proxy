@@ -49,8 +49,9 @@ SOFA_FEED_URL       = os.getenv('SOFA_FEED_URL',
 SOFA_CACHE_TTL_HOURS = float(os.getenv('SOFA_CACHE_TTL_HOURS', '6'))
 
 ABM_ENABLED = all([ABM_CLIENT_ID, ABM_KEY_ID, ABM_PRIVATE_KEY_FILE])
-ABM_API_BASE = 'https://api-business.apple.com/v1'
-ABM_AUTH_URL = 'https://account.apple.com/auth/oauth2/token'
+ABM_API_BASE    = os.getenv('ABM_API_BASE', 'https://api-business.apple.com/v1')
+ABM_OAUTH_SCOPE = os.getenv('ABM_OAUTH_SCOPE', 'business.api')
+ABM_AUTH_URL    = 'https://account.apple.com/auth/oauth2/token'
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -152,7 +153,7 @@ def get_token(force_refresh: bool = False) -> str:
             'client_assertion_type':
                 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
             'client_assertion': assertion,
-            'scope': 'business.api',
+            'scope': ABM_OAUTH_SCOPE,
         },
         headers={'Content-Type': 'application/x-www-form-urlencoded'},
         timeout=30,
