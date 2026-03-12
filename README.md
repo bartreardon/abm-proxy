@@ -1,17 +1,19 @@
 # ABM Proxy
 
-A lightweight caching proxy/middleware for the **Apple Business Manager (ABM) API**.
+A lightweight caching proxy/middleware for the **Apple Business Manager (ABM)** and **Apple School Manager (ASM)** APIs.
 Exposes a simple REST API and a built-in web UI for device lookup, with optional [SOFA](https://sofa.macadmins.io) integration for macOS release and compatibility information.
 
 **Features**
 
 - Single-device lookup with AppleCare coverage and MDM server details
 - File-based device cache with configurable TTL and manual per-device refresh
-- Background bulk-fetch of all ABM devices with automatic rate-limit handling
+- Background bulk-fetch of all ABM/ASM devices with automatic rate-limit handling
 - Deep-linkable device results — share or bookmark `https://your-host/SERIALNUMBER`
 - SOFA macOS version feed with disk caching — shows latest releases and per-device supported OS versions
+- Generic API proxy — forward any ABM/ASM API call through the proxy without implementing each endpoint individually
+- Supports both Apple Business Manager and Apple School Manager via configurable base URL and OAuth scope
 - Built-in browser UI (no external dependencies)
-- Optional API key protection for all `/api/*` endpoints
+- Optional API key protection for all `/api/*` endpoints; write operations via the proxy always require a key
 - Docker-ready with configurable port
 
 ---
@@ -26,14 +28,16 @@ Exposes a simple REST API and a built-in web UI for device lookup, with optional
 
 ---
 
-## Obtaining ABM API Credentials
+## Obtaining API Credentials
 
-You need four values from Apple Business Manager.
+You need four values from Apple Business Manager or Apple School Manager.
 
-### 1 – Create an API key in ABM
+### 1 – Create an API key
 
-1. Sign in to [business.apple.com](https://business.apple.com) as an Administrator.
-2. Go to **Settings → API & Privacy → API Keys**.
+**Apple Business Manager:** Sign in to [business.apple.com](https://business.apple.com) as an Administrator.
+**Apple School Manager:** Sign in to [school.apple.com](https://school.apple.com) as an Administrator.
+
+1. Go to **Settings → API & Privacy → API Keys**.
 3. Click **Generate API Key**.
 4. Enter a name, select the **Device Management** permission scope, and save.
 5. Download the **private key** (`.p8` file) — Apple shows it only once.
@@ -246,16 +250,18 @@ All settings are read from `.env` (or from environment variables directly).
 
 | Variable | Default | Description |
 |---|---|---|
-| `ABM_CLIENT_ID` | — | ABM OAuth2 Client ID (**required**) |
-| `ABM_TEAM_ID` | — | ABM Organisation / Team ID (**required**) |
-| `ABM_KEY_ID` | — | ABM API Key ID (**required**) |
+| `ABM_CLIENT_ID` | — | OAuth2 Client ID (**required**) |
+| `ABM_TEAM_ID` | — | Organisation / Team ID (**required**) |
+| `ABM_KEY_ID` | — | API Key ID (**required**) |
 | `ABM_PRIVATE_KEY_FILE` | — | Path to EC private key PEM file (**required**) |
+| `ABM_API_BASE` | `https://api-business.apple.com/v1` | API base URL — change to `https://api-school.apple.com/v1` for ASM |
+| `ABM_OAUTH_SCOPE` | `business.api` | OAuth2 scope — use `school.api` for ASM |
 | `PORT` | `5050` | Port to listen on |
 | `HOST` | `0.0.0.0` | Bind address |
 | `CACHE_DIR` | `./cache` | Directory for cached device and SOFA JSON files |
 | `CACHE_TTL_HOURS` | `24` | Device cache TTL in hours; `0` = never expire |
 | `LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
-| `API_KEY` | *(empty)* | When set, all `/api/*` endpoints require `X-API-Key: <value>` header |
+| `API_KEY` | *(empty)* | When set, all `/api/*` endpoints require `X-API-Key: <value>` header; **must** be set to use write operations on `/v1/proxy/*` |
 | `SOFA_ENABLED` | `true` | Enable SOFA macOS version and compatibility feed |
 | `SOFA_FEED_URL` | *(SOFA default)* | Override the SOFA feed URL |
 | `SOFA_CACHE_TTL_HOURS` | `6` | SOFA feed cache TTL in hours |
@@ -447,6 +453,39 @@ Add `?refresh=true` to force a network refresh regardless of cache age.
 
 ---
 
+### `GET|POST|PUT|PATCH|DELETE /v1/proxy/<path>`
+
+Transparent passthrough to any ABM/ASM API endpoint. The proxy prepends `ABM_API_BASE`
+and forwards query parameters, request body, and `Content-Type` as-is, returning the
+upstream HTTP status code.
+
+| Condition | Behaviour |
+|---|---|
+| `GET` | Follows normal `API_KEY` rules (optional if not configured) |
+| `POST` / `PUT` / `PATCH` / `DELETE` | **Requires** `API_KEY` to be set and a valid key to be supplied — returns `403` if `API_KEY` is empty |
+
+**Examples:**
+
+```
+GET  /v1/proxy/mdmServers
+GET  /v1/proxy/mdmServers/{id}/relationships/devices
+GET  /v1/proxy/orgDevices?limit=50&cursor=abc
+```
+
+These map to the equivalent paths under `ABM_API_BASE`, e.g.:
+```
+https://api-business.apple.com/v1/mdmServers
+https://api-school.apple.com/v1/mdmServers/{id}/relationships/devices
+```
+
+**Error responses:**
+- `403` – Write method attempted but `API_KEY` is not configured
+- `401` – API key provided but incorrect
+- `501` – ABM/ASM not configured
+- `502` – Could not obtain access token or upstream request failed
+
+---
+
 ## Caching Details
 
 | Data | Storage | Default TTL |
@@ -473,7 +512,7 @@ Nginx + Certbot, Caddy, and self-signed certificates.
 ## Security Notes
 
 - Restrict permissions on `private_key.pem`: `chmod 600 private_key.pem`
-- Set `API_KEY` for any internet-facing deployment
+- Set `API_KEY` for any internet-facing deployment; this is **mandatory** to use write operations (`POST`/`PUT`/`PATCH`/`DELETE`) on `/v1/proxy/*`
 - The cache directory contains device data from your ABM organisation — secure it accordingly
 - Do not commit `.env` or `private_key.pem` to version control
   (add both to `.gitignore`)
