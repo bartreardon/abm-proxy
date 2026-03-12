@@ -50,6 +50,9 @@ You need four values from Apple Business Manager.
 
 > The `.p8` file Apple provides is already PEM-formatted. Rename it to `private_key.pem`
 > (or any name you prefer) and reference that path in `ABM_PRIVATE_KEY_FILE`.
+>
+> Also ensure the file is in the correct format. The header should be `-----BEGIN PRIVATE KEY-----` <br>
+> If it begins `-----BEGIN EC PRIVATE KEY-----`, remove the `EC` from the header and footer before using.
 
 ---
 
