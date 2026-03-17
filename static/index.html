@@ -197,9 +197,8 @@
     .field .value.mono { font-family: 'SF Mono', 'Menlo', monospace; font-size: 13px; }
     .field .value.na   { color: var(--muted); }
 
-    /* macOS versions */
-    #sofa-section { margin-top: 28px; display: none; }
-    #sofa-section h3 { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+    /* OS version sections */
+    #sofa-section h3, #sofa-ios-section h3 { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
     .os-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
     .os-card {
       background: var(--card-bg);
@@ -325,9 +324,15 @@
   </div><!-- #result -->
 
   <!-- macOS versions from SOFA -->
-  <div id="sofa-section">
+  <div id="sofa-section" style="display:none;margin-top:28px">
     <h3>Latest macOS Releases <span style="font-size:12px;color:var(--muted);font-weight:400">via SOFA</span></h3>
     <div class="os-grid" id="os-grid"></div>
+  </div>
+
+  <!-- iOS versions from SOFA -->
+  <div id="sofa-ios-section" style="display:none;margin-top:28px">
+    <h3>Latest iOS &amp; iPadOS Releases <span style="font-size:12px;color:var(--muted);font-weight:400">via SOFA</span></h3>
+    <div class="os-grid" id="ios-grid"></div>
   </div>
 
 </main>
@@ -355,34 +360,46 @@
   }
 
   // ---- SOFA ----------------------------------------------------------------
+  function buildOsGrid(gridId, sectionId, versions) {
+    const keys = Object.keys(versions).sort((a, b) => {
+      const ver = s => parseFloat(s.match(/(\d+(?:\.\d+)?)\s*$/)?.[1] ?? '0');
+      return ver(b) - ver(a);
+    });
+    if (!keys.length) return;
+
+    const grid = $(gridId);
+    grid.innerHTML = '';
+    keys.forEach(name => {
+      const v = versions[name];
+      const el = document.createElement('div');
+      el.className = 'os-card';
+      el.innerHTML = `
+        <div class="os-name">${esc(name)}</div>
+        <div class="os-ver">${esc(v.version || '–')}</div>
+        <div class="os-build">${esc(v.build || '')}</div>
+        <div class="os-date">${v.release_date ? fmtDate(v.release_date) : ''}</div>
+        ${v.details_url ? `<a href="${esc(v.details_url)}" target="_blank" rel="noopener">Security info ↗</a>` : ''}
+      `;
+      grid.appendChild(el);
+    });
+    $(sectionId).style.display = 'block';
+  }
+
   async function loadSofa() {
     try {
       const r = await fetch('/api/v1/sofa');
       if (!r.ok) return;
       const d = await r.json();
-      const versions = d.versions || {};
-      const keys = Object.keys(versions).sort((a, b) => {
-        const ver = s => parseFloat(s.match(/(\d+(?:\.\d+)?)\s*$/)?.[1] ?? '0');
-        return ver(b) - ver(a);
-      });
-      if (!keys.length) return;
+      buildOsGrid('os-grid', 'sofa-section', d.versions || {});
+    } catch { /* silent */ }
+  }
 
-      const grid = $('os-grid');
-      grid.innerHTML = '';
-      keys.forEach(name => {
-        const v = versions[name];
-        const el = document.createElement('div');
-        el.className = 'os-card';
-        el.innerHTML = `
-          <div class="os-name">${esc(name)}</div>
-          <div class="os-ver">${esc(v.version || '–')}</div>
-          <div class="os-build">${esc(v.build || '')}</div>
-          <div class="os-date">${v.release_date ? fmtDate(v.release_date) : ''}</div>
-          ${v.details_url ? `<a href="${esc(v.details_url)}" target="_blank" rel="noopener">Security info ↗</a>` : ''}
-        `;
-        grid.appendChild(el);
-      });
-      $('sofa-section').style.display = 'block';
+  async function loadSofaIos() {
+    try {
+      const r = await fetch('/api/v1/sofa/ios');
+      if (!r.ok) return;
+      const d = await r.json();
+      buildOsGrid('ios-grid', 'sofa-ios-section', d.versions || {});
     } catch { /* silent */ }
   }
 
@@ -670,6 +687,7 @@
   // ---- Init ----------------------------------------------------------------
   checkHealth();
   loadSofa();
+  loadSofaIos();
 
   // Auto-lookup if a serial is already in the URL path
   const initSerial = serialFromPath();

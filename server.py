@@ -47,6 +47,8 @@ SOFA_ENABLED        = os.getenv('SOFA_ENABLED', 'true').lower() == 'true'
 SOFA_FEED_URL       = os.getenv('SOFA_FEED_URL',
                         'https://sofafeed.macadmins.io/v1/macos_data_feed.json')
 SOFA_CACHE_TTL_HOURS = float(os.getenv('SOFA_CACHE_TTL_HOURS', '6'))
+SOFA_IOS_FEED_URL   = os.getenv('SOFA_IOS_FEED_URL',
+                        'https://sofa.macadmins.io/v2/ios_data_feed.json')
 
 ABM_ENABLED = all([ABM_CLIENT_ID, ABM_KEY_ID, ABM_PRIVATE_KEY_FILE])
 ABM_API_BASE = 'https://api-business.apple.com/v1'
@@ -73,6 +75,7 @@ CORS(app)
 _assertion_cache: dict = {'value': None, 'expires': 0}
 _token_cache: dict     = {'value': None, 'expires': 0}
 _sofa_cache: dict      = {'data': None,  'expires': 0}
+_sofa_ios_cache: dict  = {'data': None,  'expires': 0}
 
 # ---------------------------------------------------------------------------
 # Bulk fetch state
@@ -275,8 +278,19 @@ def _enrich_with_sofa(data: dict) -> dict:
     """Attach SOFA model info to a device record (mutates in place, returns it)."""
     if not SOFA_ENABLED or data.get('error'):
         return data
-    product_type = data.get('device', {}).get('attributes', {}).get('productType')
-    data['sofaModelInfo'] = sofa_model_info(product_type) if product_type else None
+    attrs        = data.get('device', {}).get('attributes', {})
+    product_type = attrs.get('productType')
+    if not product_type:
+        data['sofaModelInfo'] = None
+        return data
+    family = attrs.get('productFamily', '')
+    if family in ('iPhone', 'iPad'):
+        info = sofa_ios_model_info(product_type)
+    else:
+        info = sofa_model_info(product_type)
+        if info is None:
+            info = sofa_ios_model_info(product_type)
+    data['sofaModelInfo'] = info
     return data
 
 
@@ -307,7 +321,8 @@ def get_device_info(serial: str, force_refresh: bool = False) -> tuple[dict | No
 # SOFA integration
 # ===========================================================================
 
-_SOFA_DISK_CACHE = Path(CACHE_DIR) / 'sofa_feed.json'
+_SOFA_DISK_CACHE     = Path(CACHE_DIR) / 'sofa_feed.json'
+_SOFA_IOS_DISK_CACHE = Path(CACHE_DIR) / 'sofa_ios_feed.json'
 
 
 def _sofa_disk_read() -> dict | None:
@@ -394,6 +409,92 @@ def sofa_model_info(product_type: str) -> dict | None:
         return None
     models = data.get('Models', {})
     return models.get(product_type)
+
+
+def sofa_ios_model_info(product_type: str) -> dict | None:
+    """Return iOS SOFA Models entry for a given productType (e.g. 'iPhone16,1')."""
+    if not product_type or not SOFA_ENABLED:
+        return None
+    data = get_sofa_ios_data()
+    if not data:
+        return None
+    models = data.get('Models', {})
+    return models.get(product_type)
+
+
+def _sofa_ios_disk_read() -> dict | None:
+    """Return disk-cached iOS SOFA data if it is still within TTL."""
+    if not _SOFA_IOS_DISK_CACHE.exists():
+        return None
+    try:
+        raw = json.loads(_SOFA_IOS_DISK_CACHE.read_text())
+        saved_at = raw.get('_cached_at', 0)
+        if time.time() - saved_at < SOFA_CACHE_TTL_HOURS * 3600:
+            return raw.get('data')
+    except Exception:
+        pass
+    return None
+
+
+def _sofa_ios_disk_write(data: dict) -> None:
+    try:
+        _SOFA_IOS_DISK_CACHE.write_text(
+            json.dumps({'_cached_at': time.time(), 'data': data}, indent=2)
+        )
+    except Exception as e:
+        log.warning("Could not write iOS SOFA disk cache: %s", e)
+
+
+def get_sofa_ios_data(force_refresh: bool = False) -> dict | None:
+    if not SOFA_ENABLED:
+        return None
+    now = time.time()
+
+    # 1 – in-memory (fastest)
+    if not force_refresh and _sofa_ios_cache['data'] and _sofa_ios_cache['expires'] > now:
+        return _sofa_ios_cache['data']
+
+    # 2 – disk cache (survives restarts)
+    if not force_refresh:
+        disk = _sofa_ios_disk_read()
+        if disk:
+            _sofa_ios_cache.update({'data': disk, 'expires': now + SOFA_CACHE_TTL_HOURS * 3600})
+            log.debug("iOS SOFA feed loaded from disk cache")
+            return disk
+
+    # 3 – fetch from network
+    try:
+        resp = requests.get(SOFA_IOS_FEED_URL, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        _sofa_ios_cache.update({'data': data, 'expires': now + SOFA_CACHE_TTL_HOURS * 3600})
+        _sofa_ios_disk_write(data)
+        log.info("Refreshed iOS SOFA feed from network")
+    except Exception as e:
+        log.warning("iOS SOFA fetch failed: %s", e)
+
+    return _sofa_ios_cache.get('data')
+
+
+def latest_ios_versions() -> dict:
+    data = get_sofa_ios_data()
+    if not data:
+        return {}
+    result = {}
+    try:
+        for entry in data.get('OSVersions', []):
+            name   = entry.get('OSVersion', '')
+            latest = entry.get('Latest', {})
+            result[name] = {
+                'version':      latest.get('ProductVersion', ''),
+                'build':        latest.get('Build', ''),
+                'release_date': latest.get('ReleaseDate', ''),
+                'security_info': latest.get('SecurityInfo', ''),
+                'details_url':  latest.get('DetailsURL', ''),
+            }
+    except Exception as e:
+        log.warning("Error parsing iOS SOFA data: %s", e)
+    return result
 
 
 # ===========================================================================
@@ -654,14 +755,31 @@ def sofa():
     })
 
 
+@app.get('/api/v1/sofa/ios')
+def sofa_ios():
+    if not SOFA_ENABLED:
+        return jsonify({'error': 'SOFA integration not enabled'}), 501
+
+    force = request.args.get('refresh', '').lower() == 'true'
+    if force:
+        get_sofa_ios_data(force_refresh=True)
+
+    return jsonify({
+        'sofa_enabled':  True,
+        'versions':      latest_ios_versions(),
+        'feed_url':      SOFA_IOS_FEED_URL,
+        'cache_ttl_hours': SOFA_CACHE_TTL_HOURS,
+    })
+
+
 # ===========================================================================
 # Entry point
 # ===========================================================================
 
 if __name__ == '__main__':
     log.info(
-        "Starting ABM Proxy on %s:%s  (ABM: %s | SOFA: %s)",
-        HOST, PORT, ABM_ENABLED, SOFA_ENABLED,
+        "Starting ABM Proxy on %s:%s  (ABM: %s | SOFA macOS: %s | SOFA iOS: %s)",
+        HOST, PORT, ABM_ENABLED, SOFA_ENABLED, SOFA_ENABLED,
     )
     if not ABM_ENABLED:
         log.warning(
