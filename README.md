@@ -261,7 +261,7 @@ All settings are read from `.env` (or from environment variables directly).
 | `CACHE_DIR` | `./cache` | Directory for cached device and SOFA JSON files |
 | `CACHE_TTL_HOURS` | `24` | Device cache TTL in hours; `0` = never expire |
 | `LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
-| `API_KEY` | *(empty)* | When set, all `/api/*` endpoints require `X-API-Key: <value>` header; **must** be set to use write operations on `/v1/proxy/*` |
+| `API_KEY` | *(empty)* | When set, all `/api/*` endpoints require `X-API-Key: <value>` header; **must** be set to use write operations on `/api/v1/proxy/*` |
 | `SOFA_ENABLED` | `true` | Enable SOFA macOS version and compatibility feed |
 | `SOFA_FEED_URL` | *(SOFA default)* | Override the SOFA feed URL |
 | `SOFA_CACHE_TTL_HOURS` | `6` | SOFA feed cache TTL in hours |
@@ -453,7 +453,7 @@ Add `?refresh=true` to force a network refresh regardless of cache age.
 
 ---
 
-### `GET|POST|PUT|PATCH|DELETE /v1/proxy/<path>`
+### `GET|POST|PUT|PATCH|DELETE /api/v1/proxy/<path>`
 
 Transparent passthrough to any ABM/ASM API endpoint. The proxy prepends `ABM_API_BASE`
 and forwards query parameters, request body, and `Content-Type` as-is, returning the
@@ -467,9 +467,9 @@ upstream HTTP status code.
 **Examples:**
 
 ```
-GET  /v1/proxy/mdmServers
-GET  /v1/proxy/mdmServers/{id}/relationships/devices
-GET  /v1/proxy/orgDevices?limit=50&cursor=abc
+GET  /api/v1/proxy/mdmServers
+GET  /api/v1/proxy/mdmServers/{id}/relationships/devices
+GET  /api/v1/proxy/orgDevices?limit=50&cursor=abc
 ```
 
 These map to the equivalent paths under `ABM_API_BASE`, e.g.:
@@ -512,7 +512,7 @@ Nginx + Certbot, Caddy, and self-signed certificates.
 ## Security Notes
 
 - Restrict permissions on `private_key.pem`: `chmod 600 private_key.pem`
-- Set `API_KEY` for any internet-facing deployment; this is **mandatory** to use write operations (`POST`/`PUT`/`PATCH`/`DELETE`) on `/v1/proxy/*`
+- Set `API_KEY` for any internet-facing deployment; this is **mandatory** to use write operations (`POST`/`PUT`/`PATCH`/`DELETE`) on `/api/v1/proxy/*`
 - The cache directory contains device data from your ABM organisation — secure it accordingly
 - Do not commit `.env` or `private_key.pem` to version control
   (add both to `.gitignore`)
