@@ -21,7 +21,8 @@ Plugin results are cached separately from ABM data with a short TTL (default 2 m
 
 | File | MDM | Notes |
 |------|-----|-------|
-| `jamf.py` | Jamf Pro | Computers (v3 API) and mobile devices (v2 API) |
+| `jamf.py` | Jamf Pro | Computers (v3 API) and mobile devices (v2 API); OAuth2 client credentials |
+| `fleetdm.py` | FleetDM | All platforms; static API token auth |
 
 ---
 
