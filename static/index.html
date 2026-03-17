@@ -256,7 +256,7 @@
       </div>
     </div>
 
-    <div class="cards">
+    <div class="cards" id="device-cards">
       <!-- Device info -->
       <div class="card">
         <h4>Device Details</h4>
@@ -546,6 +546,9 @@
     // SOFA model info
     renderSofaModel(d.sofaModelInfo);
 
+    // MDM plugin cards
+    renderPlugins(d.mdmPlugins);
+
     // Cache meta
     setField('f-cache-source', d.from_cache ? 'Local cache' : 'ABM API (live)');
     setField('f-cached-at',    fmtDate(d.cached_at));
@@ -628,6 +631,47 @@
     });
 
     card.style.display = '';
+  }
+
+  // ---- MDM plugin cards ----------------------------------------------------
+  function renderPlugins(plugins) {
+    // Remove any plugin cards from a previous lookup
+    document.querySelectorAll('#device-cards .plugin-card').forEach(el => el.remove());
+
+    if (!plugins || !Object.keys(plugins).length) return;
+
+    const grid = $('device-cards');
+    Object.values(plugins).forEach(plugin => {
+      const card = document.createElement('div');
+      card.className = 'card plugin-card';
+
+      const cacheTag = plugin.from_cache
+        ? ' <span style="font-size:10px;font-weight:400;color:var(--muted)">(cached)</span>'
+        : '';
+
+      let body = '';
+      if (plugin.error) {
+        body = `<div class="field"><div class="value na">${esc(plugin.error)}</div></div>`;
+      } else if (!plugin.data) {
+        body = `<div class="field"><div class="value na">Not found in this MDM</div></div>`;
+      } else {
+        (plugin.fields || []).forEach(f => {
+          const val = plugin.data[f.key];
+          const empty = val === null || val === undefined || val === '';
+          body += `
+            <div class="field">
+              <div class="label">${esc(f.label)}</div>
+              <div class="value${empty ? ' na' : ''}">${esc(empty ? '—' : val)}</div>
+            </div>`;
+        });
+      }
+
+      card.innerHTML = `
+        <h4>${esc(plugin.display_name)}${cacheTag}
+          <span style="font-weight:400;font-size:11px;color:var(--muted)">via MDM</span>
+        </h4>${body}`;
+      grid.appendChild(card);
+    });
   }
 
   // ---- Helpers -------------------------------------------------------------

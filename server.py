@@ -22,6 +22,7 @@ from cryptography.hazmat.primitives.serialization import (
     NoEncryption,
 )
 import requests
+from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -98,6 +99,17 @@ _bulk_lock = threading.Lock()
 # ---------------------------------------------------------------------------
 Path(CACHE_DIR).mkdir(parents=True, exist_ok=True)
 Path(f'{CACHE_DIR}/devices').mkdir(parents=True, exist_ok=True)
+Path(f'{CACHE_DIR}/plugins').mkdir(parents=True, exist_ok=True)
+
+# ---------------------------------------------------------------------------
+# Plugin registry
+# ---------------------------------------------------------------------------
+_plugins: list = []
+try:
+    from plugins import load_plugins as _load_plugins
+    _plugins = _load_plugins(Path(__file__).parent / 'plugins')
+except Exception as _plugin_load_err:
+    log.warning("Plugin loading failed: %s", _plugin_load_err)
 
 
 # ===========================================================================
@@ -304,7 +316,9 @@ def get_device_info(serial: str, force_refresh: bool = False) -> tuple[dict | No
         if cached:
             # Always re-run SOFA enrichment so it reflects current SOFA data
             # even when the device record itself is served from cache.
-            return _enrich_with_sofa(cached), True
+            data = _enrich_with_sofa(cached)
+            data['mdmPlugins'] = _run_plugins(serial, data)
+            return data, True
 
     if not ABM_ENABLED:
         return None, False
@@ -312,10 +326,116 @@ def get_device_info(serial: str, force_refresh: bool = False) -> tuple[dict | No
     try:
         data = fetch_device_from_abm(serial)
         write_cache(serial, data)
-        return _enrich_with_sofa(data), False
+        data = _enrich_with_sofa(data)
+        # force_refresh=True bypasses plugin cache so MDM data is also fresh
+        data['mdmPlugins'] = _run_plugins(serial, data, force_refresh=force_refresh)
+        return data, False
     except Exception as e:
         log.error("Error fetching %s from ABM: %s", serial, e)
         return None, False
+
+
+# ===========================================================================
+# Plugin cache
+# ===========================================================================
+
+def _plugin_cache_path(plugin_name: str, serial: str) -> Path:
+    return Path(CACHE_DIR) / 'plugins' / plugin_name / f'{serial.upper()}.json'
+
+
+def _read_plugin_cache(plugin_name: str, serial: str) -> dict | None:
+    """Return cached plugin entry if still within TTL, else None."""
+    path = _plugin_cache_path(plugin_name, serial)
+    if not path.exists():
+        return None
+    try:
+        raw        = json.loads(path.read_text())
+        cached_at  = raw.get('_cached_at', 0)
+        ttl_mins   = raw.get('_ttl_minutes', 2)
+        if time.time() - cached_at < ttl_mins * 60:
+            return raw.get('entry')
+    except Exception:
+        pass
+    return None
+
+
+def _write_plugin_cache(plugin_name: str, serial: str,
+                         entry: dict, ttl_minutes: int) -> None:
+    path = _plugin_cache_path(plugin_name, serial)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.write_text(json.dumps({
+            '_cached_at':   time.time(),
+            '_ttl_minutes': ttl_minutes,
+            'entry':        entry,
+        }, indent=2))
+    except Exception as exc:
+        log.warning("Plugin cache write failed (%s/%s): %s", plugin_name, serial, exc)
+
+
+def _run_plugins(serial: str, abm_data: dict,
+                 force_refresh: bool = False) -> dict:
+    """Run all matching plugins in parallel and return mdmPlugins dict."""
+    if not _plugins:
+        return {}
+
+    matching = [p for p in _plugins if p.matches_device(abm_data)]
+    if not matching:
+        return {}
+
+    def _run_one(plugin):
+        # Check short-lived plugin cache (rate-limit protection)
+        if not force_refresh:
+            cached = _read_plugin_cache(plugin.name, serial)
+            if cached is not None:
+                return plugin.name, {**cached, 'from_cache': True}
+
+        # Live fetch
+        try:
+            data = plugin.fetch(serial, abm_data)
+            entry = {
+                'display_name': plugin.display_name,
+                'fields':       plugin.fields,
+                'data':         data,
+                'error':        None,
+                'from_cache':   False,
+                'cached_at':    datetime.now(timezone.utc).isoformat(),
+            }
+            _write_plugin_cache(plugin.name, serial, entry, plugin.cache_ttl_minutes)
+        except Exception as exc:
+            log.warning("Plugin '%s' fetch failed for %s: %s", plugin.name, serial, exc)
+            entry = {
+                'display_name': plugin.display_name,
+                'fields':       plugin.fields,
+                'data':         None,
+                'error':        str(exc),
+                'from_cache':   False,
+                'cached_at':    None,
+            }
+            # Errors are not cached — next request will retry
+
+        return plugin.name, entry
+
+    results: dict = {}
+    with ThreadPoolExecutor(max_workers=len(matching)) as executor:
+        futures = {executor.submit(_run_one, p): p for p in matching}
+        for future in futures:
+            try:
+                name, entry = future.result(timeout=20)
+                results[name] = entry
+            except Exception as exc:
+                p = futures[future]
+                log.warning("Plugin runner error (%s): %s", p.name, exc)
+                results[p.name] = {
+                    'display_name': p.display_name,
+                    'fields':       p.fields,
+                    'data':         None,
+                    'error':        str(exc),
+                    'from_cache':   False,
+                    'cached_at':    None,
+                }
+
+    return results
 
 
 # ===========================================================================
@@ -687,6 +807,8 @@ def health():
         'cache_dir':       CACHE_DIR,
         'cache_ttl_hours': CACHE_TTL_HOURS,
         'cached_devices':  cached_count,
+        'plugins':         [{'name': p.name, 'display_name': p.display_name}
+                            for p in _plugins],
     })
 
 
