@@ -1,11 +1,16 @@
 """Jamf Pro MDM plugin for ABM Proxy.
 
-Queries the Jamf Pro modern API (v1/v2) for computer and mobile device
-records using the device serial number. Authentication uses OAuth2
-client credentials (Settings → API roles and clients in Jamf Pro).
+Queries the Jamf Pro modern API (v3 computers, v2 mobile devices) for device
+records using the serial number. Authentication uses OAuth2 client credentials
+(Settings → API roles and clients in Jamf Pro).
 
 Copy jamf.env.example to jamf.env and fill in your values.
 For a second Jamf instance, copy both files to jamf_site2.py / jamf_site2.env.
+
+API references:
+  Computers : GET /api/v3/computers-inventory
+  Mobile    : GET /api/v2/mobile-devices
+  Auth      : POST /api/oauth/token  (client_credentials grant)
 """
 from __future__ import annotations
 
@@ -83,10 +88,10 @@ class JamfPlugin(MDMPlugin):
 
     def _fetch_computer(self, serial: str, token: str) -> dict | None:
         resp = requests.get(
-            f'{self._url}/api/v1/computers-inventory',
+            f'{self._url}/api/v3/computers-inventory',
             params={
                 'filter':  f'hardware.serialNumber=="{serial}"',
-                'section': ['GENERAL', 'USER_AND_LOCATION', 'OPERATING_SYSTEM'],
+                'section': ['GENERAL', 'HARDWARE', 'OS', 'USER_AND_LOCATION'],
             },
             headers={'Authorization': f'Bearer {token}', 'Accept': 'application/json'},
             timeout=15,
@@ -98,7 +103,7 @@ class JamfPlugin(MDMPlugin):
         c       = results[0]
         general = c.get('general', {})
         loc     = c.get('userAndLocation', {})
-        os_     = c.get('operatingSystem', {})
+        os_     = c.get('os', {})
         return {
             'managed':       general.get('remoteManagement', {}).get('managed'),
             'last_check_in': general.get('lastContactTime'),
