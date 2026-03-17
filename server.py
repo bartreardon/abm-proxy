@@ -412,14 +412,26 @@ def sofa_model_info(product_type: str) -> dict | None:
 
 
 def sofa_ios_model_info(product_type: str) -> dict | None:
-    """Return iOS SOFA Models entry for a given productType (e.g. 'iPhone16,1')."""
+    """Return iOS compatibility info for a productType (e.g. 'iPhone16,1').
+
+    The iOS SOFA feed has no Models dict; instead each OSVersions entry lists
+    SupportedDevices. We walk those entries to find which iOS versions support
+    this device and return them as SupportedOS.
+    """
     if not product_type or not SOFA_ENABLED:
         return None
     data = get_sofa_ios_data()
     if not data:
         return None
-    models = data.get('Models', {})
-    return models.get(product_type)
+    supported = []
+    for entry in data.get('OSVersions', []):
+        os_ver = entry.get('OSVersion', '')
+        latest = entry.get('Latest', {})
+        if product_type in latest.get('SupportedDevices', []):
+            supported.append(f'iOS {os_ver}')
+    if not supported:
+        return None
+    return {'SupportedOS': supported}
 
 
 def _sofa_ios_disk_read() -> dict | None:
