@@ -671,7 +671,7 @@ def require_api_key_strict(f):
 # ===========================================================================
 
 @app.route('/', defaults={'serial_path': None})
-@app.route('/<path:serial_path>')
+@app.route('/<string:serial_path>')
 def index(serial_path):
     del serial_path  # path segment is read by JS via window.location
     return send_from_directory('static', 'index.html')
@@ -770,12 +770,12 @@ def bulk_fetch_status():
 
 # ---- Generic ABM API proxy --------------------------------------------------
 
-@app.route('/v1/proxy/<path:abm_path>', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
+@app.route('/api/v1/proxy/<path:abm_path>', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
 @require_api_key
 def abm_proxy(abm_path):
     """Transparent proxy to any ABM API endpoint.
 
-    Maps  GET /v1/proxy/mdmServers
+    Maps  GET /api/v1/proxy/mdmServers
       →   GET https://api-business.apple.com/v1/mdmServers
 
     Query parameters, request body, and Content-Type are forwarded as-is.
